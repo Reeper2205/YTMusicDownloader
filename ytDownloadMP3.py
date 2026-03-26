@@ -8,7 +8,16 @@ class YouTubeDownloaderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("YouTube MP3 Downloader")
-        self.root.geometry("400x250")
+        self.root.geometry("400x300")   # Slightly taller for the new button
+        
+        # Cross-platform default output directory: User's Downloads folder
+        if os.name == 'nt':  # Windows
+            self.default_output_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        else:  # Linux / macOS
+            self.default_output_dir = os.path.expanduser("~/Downloads")
+        
+        # Make sure the folder exists (create it if missing)
+        os.makedirs(self.default_output_dir, exist_ok=True)
         
         # URL Label and Entry
         self.url_label = ttk.Label(root, text="YouTube URL:")
@@ -18,10 +27,11 @@ class YouTubeDownloaderApp:
         self.url_entry.pack(pady=5)
         
         # Output Directory Label and Entry
-        self.dir_label = ttk.Label(root, text="Output Directory (optional):")
+        self.dir_label = ttk.Label(root, text="Output Directory:")
         self.dir_label.pack(pady=5)
         
         self.dir_entry = ttk.Entry(root, width=50)
+        self.dir_entry.insert(0, self.default_output_dir)
         self.dir_entry.pack(pady=5)
         
         # Progress Label
