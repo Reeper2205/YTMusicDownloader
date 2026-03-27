@@ -1,121 +1,118 @@
-import yt_dlp
 import tkinter as tk
-from tkinter import ttk, messagebox
-import threading
+from tkinter import ttk, filedialog, messagebox
+import yt_dlp
 import os
+import sys
+import threading
 
-class YouTubeDownloaderApp:
+class YouTubeMP3Downloader:
     def __init__(self, root):
         self.root = root
         self.root.title("YouTube MP3 Downloader")
-        self.root.geometry("400x300")   # Slightly taller for the new button
+        self.root.geometry("480x340")
         
-        # Cross-platform default output directory: User's Downloads folder
+        # Cross-platform default output directory
         if os.name == 'nt':  # Windows
             self.default_output_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        else:  # Linux / macOS
+        else:
             self.default_output_dir = os.path.expanduser("~/Downloads")
         
-        # Make sure the folder exists (create it if missing)
         os.makedirs(self.default_output_dir, exist_ok=True)
         
-        # URL Label and Entry
-        self.url_label = ttk.Label(root, text="YouTube URL:")
-        self.url_label.pack(pady=5)
+        # Find bundled ffmpeg/ffprobe when running as .exe
+        self.ffmpeg_location = self.get_ffmpeg_path()
         
-        self.url_entry = ttk.Entry(root, width=50)
-        self.url_entry.pack(pady=5)
+        # URL
+        ttk.Label(root, text="YouTube / YouTube Music URL:").pack(pady=8)
+        self.url_entry = ttk.Entry(root, width=65)
+        self.url_entry.pack(pady=5, padx=20)
         
-        # Output Directory Label and Entry
-        self.dir_label = ttk.Label(root, text="Output Directory:")
-        self.dir_label.pack(pady=5)
+        # Output Directory
+        ttk.Label(root, text="Output Directory:").pack(pady=8)
+        self.dir_var = tk.StringVar(value=self.default_output_dir)
+        self.dir_entry = ttk.Entry(root, textvariable=self.dir_var, width=65)
+        self.dir_entry.pack(pady=5, padx=20)
         
-        self.dir_entry = ttk.Entry(root, width=50)
-        self.dir_entry.insert(0, self.default_output_dir)
-        self.dir_entry.pack(pady=5)
+        ttk.Button(root, text="Browse...", command=self.browse_folder).pack(pady=5)
         
-        # Progress Label
-        self.progress_label = ttk.Label(root, text="")
-        self.progress_label.pack(pady=5)
+        self.progress_label = ttk.Label(root, text="", foreground="blue")
+        self.progress_label.pack(pady=10)
         
-        # Download Button
-        self.download_button = ttk.Button(root, text="Download MP3", command=self.start_download)
-        self.download_button.pack(pady=10)
+        ttk.Button(root, text="Download MP3", command=self.start_download).pack(pady=10)
         
-        # Status Label
         self.status_label = ttk.Label(root, text="Ready")
         self.status_label.pack(pady=5)
 
-    def download_progress(self, d):
-        """Update progress label during download"""
-        if d['status'] == 'downloading':
-            p = d.get('_percent_str', '0%')
-            self.progress_label.config(text=f"Progress: {p}")
-        elif d['status'] == 'finished':
-            self.progress_label.config(text="Converting to MP3...")
+    def get_ffmpeg_path(self):
+        """Return path to ffmpeg when running as PyInstaller onefile"""
+        if getattr(sys, 'frozen', False):  # Running as .exe
+            base_path = sys._MEIPASS
+            ffmpeg_path = os.path.join(base_path, "ffmpeg.exe")
+            if os.path.exists(ffmpeg_path):
+                return base_path  # Return the directory containing ffmpeg.exe
+        return None  # Fall back to system/default
 
-    def download_youtube_mp3(self, url, output_dir):
+    def browse_folder(self):
+        folder = filedialog.askdirectory(initialdir=self.default_output_dir)
+        if folder:
+            self.dir_var.set(folder)
+
+    def start_download(self):
+        url = self.url_entry.get().strip()
+        output_dir = self.dir_var.get().strip() or self.default_output_dir
+        
+        if not url:
+            messagebox.showerror("Error", "Please enter a valid URL")
+            return
+        
+        self.download_button = self.root.nametowidget(".!button")  # rough way, or store reference
+        # For simplicity we'll disable the main button later if needed
+
+        self.progress_label.config(text="Starting...")
+        self.status_label.config(text="Downloading...")
+
+        threading.Thread(target=self.download_video, args=(url, output_dir), daemon=True).start()
+
+    def download_video(self, url, output_dir):
         try:
-            # Use current directory if no output dir specified
-            if not output_dir:
-                output_dir = "."
+            output_template = os.path.join(output_dir, '%(title)s - %(artist)s.%(ext)s')
             
-            # Create directory if it doesn't exist
-            os.makedirs(output_dir, exist_ok=True)
-            
-            # Download options
-            options = {
+            ydl_opts = {
                 'format': 'bestaudio/best',
-                'keepvideo': False,
-                'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
+                'outtmpl': output_template,
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
-                'progress_hooks': [self.download_progress],
+                'noplaylist': True,
+                'no_check_certificate': True,
             }
             
-            # Download the audio
-            with yt_dlp.YoutubeDL(options) as ydl:
+            # Pass ffmpeg location if we bundled it
+            if self.ffmpeg_location:
+                ydl_opts['ffmpeg_location'] = self.ffmpeg_location
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                self.progress_label.config(text="Downloading audio...")
                 ydl.download([url])
             
-            self.status_label.config(text="Download completed!")
-            self.progress_label.config(text="")
-            messagebox.showinfo("Success", "MP3 download completed successfully!")
+            self.root.after(0, self.download_success)
             
         except Exception as e:
-            self.status_label.config(text="Error occurred")
-            self.progress_label.config(text="")
-            messagebox.showerror("Error", f"An error occurred: {str(e)}")
-        
-        # Re-enable download button
-        self.download_button.config(state="normal")
+            self.root.after(0, lambda: self.download_error(str(e)))
 
-    def start_download(self):
-        """Start download in a separate thread"""
-        url = self.url_entry.get().strip()
-        output_dir = self.dir_entry.get().strip()
-        
-        if not url:
-            messagebox.showwarning("Warning", "Please enter a YouTube URL")
-            return
-            
-        # Disable button during download
-        self.download_button.config(state="disabled")
-        self.status_label.config(text="Downloading...")
-        
-        # Run download in separate thread to prevent GUI freezing
-        download_thread = threading.Thread(
-            target=self.download_youtube_mp3,
-            args=(url, output_dir)
-        )
-        download_thread.start()
+    def download_success(self):
+        self.progress_label.config(text="")
+        self.status_label.config(text="✅ Download completed!")
+        messagebox.showinfo("Success", "MP3 downloaded successfully to your chosen folder!")
 
-def main():
+    def download_error(self, error_msg):
+        self.progress_label.config(text="")
+        self.status_label.config(text="❌ Failed")
+        messagebox.showerror("Download Error", f"Error:\n{error_msg}")
+
+if __name__ == "__main__":
     root = tk.Tk()
-    app = YouTubeDownloaderApp(root)
+    app = YouTubeMP3Downloader(root)
     root.mainloop()
-
-if __name__ == '__main__':
-    main()
